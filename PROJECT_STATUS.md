@@ -32,7 +32,8 @@ Frontend boundaries:
 
 - `frontend/app/page.tsx`: Dashboard.
 - `frontend/app/generate/page.tsx`: AI tailoring workflow.
-- `frontend/app/jobs/page.tsx`: searchable and sortable job pipeline.
+- `frontend/app/jobs/page.tsx`: Table/Kanban pipeline workspace, quick filters, manual create, and batch import entry.
+- `frontend/components/jobs`: reusable Table, Kanban, status selector, manual create, and batch import components.
 - `frontend/app/jobs/[id]/page.tsx`: job detail and lifecycle tracking.
 - `frontend/app/resumes/page.tsx`: searchable resume version ledger.
 - `frontend/app/resumes/[id]/page.tsx`: version detail, diff summary, linked Job, and downloads.
@@ -49,7 +50,7 @@ Database model:
 - `applications`: job description, analysis, cover letter, and links to profile and resume entities.
 - `application_statuses`: application workflow status.
 - `application_metadata`: optional job URL, source, location, salary, deadline, notes, and missing-skill classifications.
-- `jobs`: pipeline aggregate for a role, including status, score, lifecycle dates, and future integration anchors.
+- `jobs`: pipeline aggregate for a role, including status, score, lifecycle dates, generic ingestion metadata, and future integration anchors.
 - `job_status_events`: auditable state transition history with a source field for manual or automated updates.
 
 ## Tech Stack
@@ -113,6 +114,11 @@ Database model:
 - Reconcile legacy applications, Jobs, source resumes, and tailored resume links with an explicit idempotent CLI.
 - Cover core persistence workflows with PostgreSQL-backed API integration tests.
 - Safely synchronize source changes to the configured GitHub remote with one-time or watch-mode commands.
+- Switch Jobs between Table and Kanban views.
+- Drag Jobs between status columns or use a reliable Move To selector with rollback on failure.
+- Create manual Jobs with an optional JD and required company/title.
+- Batch-import up to 10 public Job URLs into previews with partial success, retry, selection, and explicit save confirmation.
+- Filter Jobs quickly by high match, ready status, review need, upcoming deadline, or missing Resume Version.
 
 ## Current Progress
 
@@ -131,12 +137,14 @@ Working flows:
 - View the tailored resume diff.
 - Export DOCX files.
 - Review Jobs from the Dashboard, Jobs table, and Job Detail screens.
+- Manage Jobs from Table or Kanban view, add manual Jobs, and confirm batch-import previews.
 - Review Resume Versions from `/resumes`, open historical snapshots, and download TXT, Markdown, or PDF exports.
 
 New Job Management APIs:
 
 ```text
 POST   /api/v1/jobs
+POST   /api/v1/jobs/batch-import
 GET    /api/v1/jobs
 GET    /api/v1/jobs/{job_id}
 PATCH  /api/v1/jobs/{job_id}
@@ -172,7 +180,7 @@ Keep the terminal open while using the app. Press `Control+C` to stop both servi
 
 Verification completed:
 
-- Backend unit and integration tests: `42/42` passing.
+- Backend unit and integration tests: `47/47` passing.
 - Python bytecode compilation: passing.
 - Frontend production build: passing.
 - API health, Dashboard, Job create/list/detail/status/delete, application list/detail, metadata PATCH, and resume list requests: passing.
@@ -183,7 +191,13 @@ Verification completed:
 - Browser smoke test for `/resumes`, `/resumes/{id}`, persisted diff summary, and Job Detail linked-version entry: passing.
 - PDF text extraction and rendered first-page visual review: passing.
 - Browser smoke test after Alembic adoption for `/`, `/generate`, `/jobs`, `/jobs/{id}`, `/resumes`, and `/resumes/{id}`: passing with refresh persistence and no console errors.
+- Browser smoke test for Jobs Table/Kanban switching, Add Job, Batch Import, Quick Filters, and persisted Supabase data: passing with no console errors.
+- Configured Supabase is at Alembic revision `20260604_03 (head)` and all 6 existing Jobs expose linked Resume Version and review summary flags.
+- Acceptance verification created and persisted 4 review records, confirmed 10 Table/Kanban Jobs, all 10 status columns, 5 status events for the manual acceptance Job, Dashboard synchronization, and restart persistence.
+- Live batch import verified Greenhouse and Lever success with isolated invalid/private URL failures, including a `3 success / 2 failed` partial-success run.
 - Alembic empty-database `upgrade head`, `downgrade -1`, re-upgrade, and `alembic check`: passing.
+- Job Pipeline migration `20260604_03`, manual create, status movement/events, batch partial-success import, and review rules: passing in isolated PostgreSQL.
+- Frontend production build with Table/Kanban workspace: passing.
 - Configured Supabase adoption: stamped baseline, upgraded to `20260601_02 (head)`, and ran repeatable backfill successfully.
 - Supabase backfill first run: 5 applications scanned, 0 Jobs created, 2 resumes scanned, 0 versions created, 1 tailored version updated, 0 failures.
 - Supabase backfill second run: 0 records created or updated, confirming idempotency.
@@ -205,6 +219,7 @@ Verification completed:
 - `backend/alembic/script.py.mako`
 - `backend/alembic/versions/20260601_01_baseline_schema.py`
 - `backend/alembic/versions/20260601_02_resume_ledger_legacy_compat.py`
+- `backend/alembic/versions/20260604_03_job_ingestion_metadata.py`
 - `backend/app/main.py`
 - `backend/app/core/config.py`
 - `backend/app/db/base.py`
@@ -271,6 +286,12 @@ Verification completed:
 - `frontend/app/resumes/page.tsx`
 - `frontend/app/resumes/[id]/page.tsx`
 - `frontend/lib/api.ts`
+- `frontend/lib/job-pipeline.ts`
+- `frontend/components/jobs/AddJobDialog.tsx`
+- `frontend/components/jobs/BatchImportDialog.tsx`
+- `frontend/components/jobs/JobKanban.tsx`
+- `frontend/components/jobs/JobStatusSelect.tsx`
+- `frontend/components/jobs/JobsTable.tsx`
 - `frontend/components/FileField.tsx`
 - `frontend/components/ProfileManager.tsx`
 - `frontend/components/ResumeManager.tsx`
@@ -286,7 +307,6 @@ Verification completed:
 
 ## Outstanding Issues
 
-- The repository is not yet captured as a clean baseline commit; many MVP files remain untracked.
 - Existing test data includes duplicate candidate profiles and duplicate base resumes with identical filenames.
 - Resume Library stores parsed text and filename, not the original PDF or DOCX binary.
 - SQLAlchemy metadata contains a deliberate circular relationship between `applications`, `jobs`, and `resume_versions`. The baseline migration handles foreign-key creation order explicitly, but `alembic check` emits a non-fatal table-sort warning.
@@ -294,7 +314,8 @@ Verification completed:
 - Automatic GitHub watch mode runs only while its terminal remains open. A persistent background LaunchAgent is intentionally not installed by default.
 - Diff summaries use text heuristics. They capture keyword, bullet, ordering, and technology changes but are not semantic AI explanations.
 - Profile and resume libraries do not yet support rename, delete, or deduplication.
-- Jobs do not yet have a kanban view.
+- Native HTML drag/drop is desktop-oriented; mobile and keyboard users should use the Move To selector.
+- Batch URL import is intentionally sequential and capped at 10 URLs; it does not generate materials or save without confirmation.
 - Workday, Simplify, and generic company career pages use best-effort parsing and may require manual corrections.
 - LinkedIn and Handshake imports intentionally stop with a user-readable manual-paste instruction when login or anti-bot restrictions are expected.
 - The Job URL importer fetches public server-rendered HTML only. It does not run a browser for JavaScript-heavy pages.
@@ -304,19 +325,17 @@ Verification completed:
 
 ## TODO (Priority Order)
 
-1. Create a clean Git baseline commit after reviewing `.gitignore` and excluding secrets.
-2. Add CI that boots PostgreSQL, runs `alembic upgrade head`, `alembic check`, and the integration suite.
-3. Add integration coverage for application metadata PATCH, DOCX downloads, and generic public career-page imports.
-4. Add optional manual tailored-resume editing that creates a new immutable version instead of overwriting snapshots.
-5. Add rename, delete, and deduplication controls for saved candidate profiles and base resumes.
-6. Add a Job kanban view and manual Job create form.
-7. Design integration modules keyed by `job_id`: Gmail synchronization, OA tracking, interview tracking, and Greenhouse/Lever auto apply.
-8. Decide whether original uploaded files should be stored locally or in object storage.
-9. Add authentication only if the product scope changes from local personal use to deployment.
+1. Add CI that boots PostgreSQL, runs migrations, the integration suite, and the frontend build.
+2. Add integration coverage for application metadata PATCH, DOCX downloads, and generic public career-page imports.
+3. Add optional manual tailored-resume editing that creates a new immutable version instead of overwriting snapshots.
+4. Add rename, delete, and deduplication controls for saved candidate profiles and base resumes.
+5. Design integration modules keyed by `job_id`: Gmail synchronization, OA tracking, interview tracking, and auto apply.
+6. Decide whether original uploaded files should be stored locally or in object storage.
+7. Add authentication only if the product scope changes from local personal use to deployment.
 
 ## Next Recommended Task
 
-Capture a clean Git baseline and add CI for migration plus PostgreSQL integration tests. The schema evolution path is now stable enough to protect future feature work.
+Add CI for Alembic, PostgreSQL integration tests, and the frontend build before beginning another product module.
 
 ## Session Summary
 
@@ -345,16 +364,17 @@ Capture a clean Git baseline and add CI for migration plus PostgreSQL integratio
 - Replaced startup schema mutation with async Alembic migrations and adopted the configured Supabase database at revision `20260601_02`.
 - Added an explicit repeatable legacy backfill CLI and verified it is idempotent against local tests and Supabase.
 - Added PostgreSQL-backed integration tests for Generate, Jobs, Dashboard, Resume Versions, Job Import, and legacy reconciliation.
+- Added the Table/Kanban Jobs workspace, persistent status movement, manual Job creation, batch URL preview/confirmation, and quick filters.
 
 ## How To Resume
 
 1. Open the repository at `/Users/haoyanglin/Documents/Playground/autoapply-agent`.
 2. Read this file and `README.md`.
-3. Check `git status --short`; the MVP has not yet been captured as a baseline commit.
+3. Check `git status --short` and review the current Job Pipeline Workspace changes.
 4. Confirm that `backend/.env` exists locally. Do not print or commit it because it contains database and LLM credentials.
 5. Confirm the backend with `curl http://127.0.0.1:8000/health`. Start it if needed.
 6. Confirm the frontend at `http://localhost:3000`. Start it if needed.
-7. Run `cd backend && .venv/bin/python -m alembic current` and confirm `20260601_02 (head)`.
+7. Run `cd backend && .venv/bin/python -m alembic current` and confirm `20260604_03 (head)`.
 8. Run backend tests and the frontend production build before further feature work.
 9. Create a clean Git baseline commit after reviewing untracked files and excluding secrets.
 
@@ -457,4 +477,4 @@ Not configured. The current scope is local-only personal use.
 
 ## Last Updated
 
-2026-06-04 01:06:07 EDT
+2026-06-04 02:16:59 EDT

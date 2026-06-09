@@ -1,8 +1,8 @@
 import unittest
 from datetime import date
 
-from app.models import Application
-from app.services.job_service import _derive_strengths, _parse_date, _sync_application_from_job_update
+from app.models import Application, Job
+from app.services.job_service import _derive_strengths, _parse_date, _sync_application_from_job_update, job_needs_review
 
 
 class JobServiceTests(unittest.TestCase):
@@ -25,6 +25,26 @@ class JobServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(strengths, ["python", "sql", "fastapi"])
+
+    def test_imported_job_needs_review_when_confidence_is_low(self) -> None:
+        job = Job(
+            company="Acme",
+            title="MLE",
+            description="Job description",
+            ingestion_metadata={"origin": "batch_import", "requires_review": True},
+        )
+
+        self.assertTrue(job_needs_review(job))
+
+    def test_manual_job_with_empty_description_needs_review(self) -> None:
+        job = Job(company="Acme", title="MLE", description="")
+
+        self.assertTrue(job_needs_review(job))
+
+    def test_manual_job_with_description_does_not_need_review(self) -> None:
+        job = Job(company="Acme", title="MLE", description="Build reliable production systems.")
+
+        self.assertFalse(job_needs_review(job))
 
 
 class ApplicationSyncTests(unittest.IsolatedAsyncioTestCase):

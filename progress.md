@@ -35,3 +35,16 @@
 - Browser-smoked `/`, `/generate`, `/jobs`, `/jobs/{id}`, `/resumes`, and `/resumes/{id}` after one-command startup.
 - Confirmed refresh persistence for the 5 Supabase Jobs and 7 Resume Versions and found no browser console errors.
 - Observed one transient Supabase connection timeout on the first Dashboard request; the retryable error state rendered correctly and reload recovered.
+
+## Job Pipeline Workspace - 2026-06-04
+
+- Audited Jobs API, Jobs Table page, status update flow, Job URL Import service, and Dashboard aggregation.
+- Chose native Kanban drag/drop plus Move To fallback, explicit batch preview/confirmation, and generic ingestion metadata.
+- Added migration `20260604_03`, richer Job summaries, manual-create validation, and partial-success batch import previews.
+- Added Table/Kanban views, status rollback, manual create, batch confirmation, and five quick filters.
+- Verified empty PostgreSQL migration, downgrade/re-upgrade, Alembic check, `47/47` backend tests, compileall, and frontend production build.
+- Upgraded the configured Supabase database to `20260604_03`.
+- Browser-smoked Table/Kanban switching, ten status groups, Add Job, Batch Import, Quick Filters, persisted Supabase Jobs, and console errors.
+- Restarted a stale pre-change backend process and reverified all 6 Supabase Jobs expose review and linked-resume summary flags.
+- Acceptance testing exposed and fixed whole-batch rejection for malformed URLs, empty-JD review classification, whitespace-only required fields, and missing batch result totals.
+- Verified Table/Kanban parity with 10 persisted Jobs, status movement through APPLIED/INTERVIEW/OFFER/REJECTED, 5 status events, Dashboard synchronization, Quick Filters, live Greenhouse/Lever parsing, `3 success / 2 failed` partial import, and restart persistence.

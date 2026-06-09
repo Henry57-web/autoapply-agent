@@ -1,6 +1,8 @@
 from dataclasses import asdict
+from datetime import date
 
 from app.core.config import get_settings
+from app.schemas.jobs import JobBatchImportItem, JobBatchImportPreview, JobBatchImportResult
 from app.schemas.job_import import JobImportConfidence, JobImportResult, LLMJobPageExtraction
 from app.services.job_import.fetcher import JobPageFetchError, fetch_job_page
 from app.services.job_import.parsers import ParsedJobPage, extract_page_text, parse_job_page
@@ -57,6 +59,40 @@ class JobImportService:
             raw_url=url,
         )
 
+    async def import_urls(self, urls: list[str]) -> JobBatchImportResult:
+        results: list[JobBatchImportItem] = []
+        for url in urls:
+            try:
+                imported = await self.import_url(url)
+                confidence = imported.confidence.model_dump()
+                requires_review = any(value < 0.7 for value in confidence.values()) or bool(imported.warnings)
+                results.append(
+                    JobBatchImportItem(
+                        url=url,
+                        success=True,
+                        job_preview=JobBatchImportPreview(
+                            company=imported.company,
+                            title=imported.title,
+                            location=imported.location,
+                            source=imported.source,
+                            url=imported.raw_url,
+                            salary=imported.salary,
+                            deadline=_parse_deadline(imported.deadline),
+                            description=imported.description,
+                            ingestion_metadata={
+                                "origin": "batch_import",
+                                "confidence": confidence,
+                                "warnings": imported.warnings,
+                                "requires_review": requires_review,
+                            },
+                        ),
+                        warnings=imported.warnings,
+                    )
+                )
+            except JobImportError as exc:
+                results.append(JobBatchImportItem(url=url, success=False, error=str(exc)))
+        return JobBatchImportResult(results=results)
+
     async def _apply_llm_fallback(self, parsed: ParsedJobPage, page_text: str) -> ParsedJobPage:
         try:
             data = await self.ai.generate_json(load_prompt("parse_job_page"), {"page_text": page_text})
@@ -83,3 +119,12 @@ def _confidence(parsed: ParsedJobPage) -> dict[str, float]:
         field: parsed.confidence.get(field, 0.65 if getattr(parsed, field) else 0)
         for field in ("company", "title", "location", "salary", "deadline", "description")
     }
+
+
+def _parse_deadline(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return None

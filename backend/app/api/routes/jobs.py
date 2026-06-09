@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db_session
 from app.services.application_presenter import build_application_detail, build_job_metadata
 from app.schemas.jobs import (
     DashboardStats,
+    JobBatchImportRequest,
+    JobBatchImportResult,
     JobCreate,
     JobDetail,
     JobSortField,
@@ -15,12 +18,15 @@ from app.schemas.jobs import (
     JobUpdate,
     SortDirection,
 )
+from app.models import ResumeVersion
+from app.services.job_import import JobImportService
 from app.services.job_service import (
     get_dashboard_stats,
     create_saved_job,
     delete_job,
     get_job,
     get_job_application_artifacts,
+    job_needs_review,
     list_jobs,
     update_job_status,
     update_job,
@@ -55,7 +61,15 @@ async def get_jobs(
         sort_by=sort_by,
         direction=direction,
     )
-    return [_job_summary(job) for job in jobs]
+    linked_job_ids = set(
+        await db.scalars(select(ResumeVersion.job_id).where(ResumeVersion.job_id.in_([job.id for job in jobs])))
+    )
+    return [_job_summary(job, has_resume_version=job.id in linked_job_ids) for job in jobs]
+
+
+@router.post("/jobs/batch-import", response_model=JobBatchImportResult)
+async def batch_import_jobs(payload: JobBatchImportRequest) -> JobBatchImportResult:
+    return await JobImportService().import_urls([str(url) for url in payload.urls])
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetail)
@@ -95,7 +109,7 @@ async def get_dashboard(db: AsyncSession = Depends(get_db_session)) -> Dashboard
     return await get_dashboard_stats(db)
 
 
-def _job_summary(job) -> JobSummary:
+def _job_summary(job, *, has_resume_version: bool = False) -> JobSummary:
     return JobSummary(
         id=job.id,
         application_id=job.application_id,
@@ -111,6 +125,8 @@ def _job_summary(job) -> JobSummary:
         status=job.status,
         created_at=job.created_at,
         updated_at=job.updated_at,
+        has_resume_version=has_resume_version,
+        needs_review=job_needs_review(job),
     )
 
 
@@ -122,7 +138,7 @@ async def _job_detail(db: AsyncSession, job) -> JobDetail:
         else None
     )
     return JobDetail(
-        **_job_summary(job).model_dump(),
+        **_job_summary(job, has_resume_version=resume_version is not None).model_dump(),
         description=job.description,
         ats_keywords=job.ats_keywords or [],
         missing_skills=job.missing_skills or [],

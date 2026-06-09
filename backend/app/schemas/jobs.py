@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.applications import JobMetadata, ResumeDiff
 from app.schemas.mvp import JobAnalysis, TailoredResume
@@ -33,16 +33,25 @@ class JobStatusEventDetail(BaseModel):
 
 
 class JobCreate(BaseModel):
-    company: str | None = None
-    title: str | None = None
+    company: str = Field(min_length=1)
+    title: str = Field(min_length=1)
     location: str | None = None
     job_type: str | None = None
     source: str | None = None
     url: str | None = None
     salary: str | None = None
     deadline: date | None = None
-    description: str
+    description: str = ""
     notes: str | None = None
+    ingestion_metadata: dict = Field(default_factory=dict)
+
+    @field_validator("company", "title")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Company and title cannot be blank.")
+        return value
 
 
 class JobUpdate(BaseModel):
@@ -54,13 +63,14 @@ class JobUpdate(BaseModel):
     url: str | None = None
     salary: str | None = None
     deadline: date | None = None
-    description: str | None = Field(default=None, min_length=1)
+    description: str | None = None
     notes: str | None = None
     match_score: float | None = Field(default=None, ge=0, le=100)
     ats_keywords: list[str] | None = None
     missing_skills: list[str] | None = None
     strengths: list[str] | None = None
     weaknesses: list[str] | None = None
+    ingestion_metadata: dict | None = None
     applied_at: datetime | None = None
     oa_received_at: datetime | None = None
     interview_at: datetime | None = None
@@ -82,6 +92,8 @@ class JobSummary(BaseModel):
     status: JobStatus
     created_at: datetime
     updated_at: datetime
+    has_resume_version: bool = False
+    needs_review: bool = False
 
 
 class JobDetail(JobSummary):
@@ -119,3 +131,31 @@ class DashboardStats(BaseModel):
     rejected: int
     average_match_score: float
     highest_match_score: float
+
+
+class JobBatchImportRequest(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=10)
+
+
+class JobBatchImportPreview(BaseModel):
+    company: str | None = None
+    title: str | None = None
+    location: str | None = None
+    source: str | None = None
+    url: str
+    salary: str | None = None
+    deadline: date | None = None
+    description: str = ""
+    ingestion_metadata: dict = Field(default_factory=dict)
+
+
+class JobBatchImportItem(BaseModel):
+    url: str
+    success: bool
+    job_preview: JobBatchImportPreview | None = None
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+
+
+class JobBatchImportResult(BaseModel):
+    results: list[JobBatchImportItem]

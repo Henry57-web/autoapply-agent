@@ -1,5 +1,18 @@
 # Resume Version Control Findings
 
+## Job Pipeline Workspace Findings - 2026-06-04
+
+- Existing `POST /api/v1/jobs` persists manual Jobs as `SAVED`, but `company` and `title` are optional while `description` is required.
+- Existing `PATCH /api/v1/jobs/{id}/status` already writes milestone timestamps and `job_status_events`; Kanban can reuse it unchanged.
+- Existing single-URL Job Import service already centralizes source detection, safe fetches, parsing, LLM fallback, timeout handling, and user-readable failures.
+- Existing `/jobs` is a single Table page with server-side search/status/score/sort filters.
+- Job summaries do not expose whether a tailored Resume Version is linked.
+- Imported confidence and warnings are not persisted, so a generic ingestion metadata ledger is needed for reliable Needs Review filtering.
+- Native drag/drop works well for desktop Kanban; the Move To selector remains the accessible and mobile-safe primary fallback.
+- Batch import must remain a preview operation. Saving each selected preview through `POST /jobs` preserves one validation and persistence path.
+- URL syntax validation belongs inside each batch item, not on the top-level list, so one malformed URL cannot reject valid siblings.
+- Empty descriptions are a useful general Needs Review signal for both manual and imported Jobs.
+
 ## Alembic Migration Findings
 
 - FastAPI startup currently runs `Base.metadata.create_all()`, `ensure_resume_version_schema()`, Job backfill, and Resume Version backfill.

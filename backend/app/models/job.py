@@ -34,6 +34,7 @@ class Job(Base):
     missing_skills: Mapped[list[str]] = mapped_column(JSONB, default=list)
     strengths: Mapped[list[str]] = mapped_column(JSONB, default=list)
     weaknesses: Mapped[list[str]] = mapped_column(JSONB, default=list)
+    ingestion_metadata: Mapped[dict] = mapped_column(JSONB, default=dict)
     notes: Mapped[str] = mapped_column(Text, nullable=True)
     applied_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
     oa_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)

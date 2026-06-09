@@ -26,6 +26,11 @@ async def create_saved_job(db: AsyncSession, payload: JobCreate) -> Job:
     return await get_job(db, job.id)
 
 
+def job_needs_review(job: Job) -> bool:
+    metadata = job.ingestion_metadata or {}
+    return bool(metadata.get("requires_review") or not job.description.strip())
+
+
 async def create_job_for_application(
     db: AsyncSession,
     application: Application,

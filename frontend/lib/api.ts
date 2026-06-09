@@ -77,6 +77,8 @@ export type JobSummary = {
   status: JobStatus;
   created_at: string;
   updated_at: string;
+  has_resume_version: boolean;
+  needs_review: boolean;
 };
 
 export type JobDetail = JobSummary & {
@@ -158,6 +160,38 @@ export type JobUpdateInput = {
   oa_received_at: string | null;
   interview_at: string | null;
   offer_at: string | null;
+};
+
+export type JobCreateInput = {
+  company: string;
+  title: string;
+  location?: string | null;
+  job_type?: string | null;
+  source?: string | null;
+  url?: string | null;
+  salary?: string | null;
+  deadline?: string | null;
+  description?: string;
+  notes?: string | null;
+  ingestion_metadata?: Record<string, unknown>;
+};
+
+export type JobBatchImportPreview = Omit<JobCreateInput, "company" | "title"> & {
+  company: string | null;
+  title: string | null;
+  url: string;
+};
+
+export type JobBatchImportItem = {
+  url: string;
+  success: boolean;
+  job_preview: JobBatchImportPreview | null;
+  warnings: string[];
+  error: string | null;
+};
+
+export type JobBatchImportResult = {
+  results: JobBatchImportItem[];
 };
 
 export type DashboardStats = {
@@ -352,6 +386,22 @@ export async function listJobs(params: {
 
 export async function getJob(jobId: string): Promise<JobDetail> {
   return request<JobDetail>(`/api/v1/jobs/${jobId}`);
+}
+
+export async function createJob(input: JobCreateInput): Promise<JobDetail> {
+  return request<JobDetail>("/api/v1/jobs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function batchImportJobs(urls: string[]): Promise<JobBatchImportResult> {
+  return request<JobBatchImportResult>("/api/v1/jobs/batch-import", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  });
 }
 
 export async function updateJobStatus(jobId: string, status: JobStatus): Promise<JobDetail> {

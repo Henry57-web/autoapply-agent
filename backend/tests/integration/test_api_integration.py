@@ -11,8 +11,10 @@ from sqlalchemy.pool import NullPool
 from app.db.session import get_db_session
 from app.main import app
 from app.models import Application, CandidateProfile, Job, JobStatusEvent, Resume, ResumeVersion
+from app.schemas.job_import import JobImportConfidence, JobImportResult
 from app.schemas.mvp import JobAnalysis, MatchScoreBreakdown, TailoredResume
 from app.services.job_import.fetcher import JobPageFetchError
+from app.services.job_import.service import JobImportError
 from app.services.legacy_backfill import run_legacy_backfill
 
 
@@ -177,6 +179,54 @@ class ApiIntegrationTests(unittest.TestCase):
         asyncio.run(self._assert_status_events(job_id, expected=5))
         self.assertEqual(self.client.delete(f"/api/v1/jobs/{job_id}").status_code, 204)
         self.assertEqual(self.client.get(f"/api/v1/jobs/{job_id}").status_code, 404)
+
+    def test_manual_job_create_requires_identity_but_allows_empty_description(self) -> None:
+        response = self.client.post("/api/v1/jobs", json={"company": "Manual Co", "title": "Product Manager"})
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["status"], "SAVED")
+        self.assertEqual(response.json()["description"], "")
+        updated = self.client.patch(f"/api/v1/jobs/{response.json()['id']}", json={"description": "", "notes": "Review later"})
+        self.assertEqual(updated.status_code, 200)
+        self.assertEqual(updated.json()["notes"], "Review later")
+        self.assertEqual(self.client.post("/api/v1/jobs", json={"company": "Missing title"}).status_code, 422)
+        self.assertEqual(self.client.post("/api/v1/jobs", json={"company": " ", "title": "MLE"}).status_code, 422)
+
+    def test_batch_import_supports_partial_success_without_saving_jobs(self) -> None:
+        async def import_side_effect(url: str):
+            if url == "not-a-url":
+                raise JobImportError("Invalid URL. Please paste the job description manually.")
+            return JobImportResult(
+                source="Greenhouse",
+                company="Acme AI",
+                title="MLE",
+                location="New York, NY",
+                description="Build reliable production machine learning systems with Python and evaluation tooling.",
+                confidence=JobImportConfidence(
+                    company=0.95,
+                    title=0.98,
+                    location=0.9,
+                    salary=0,
+                    deadline=0,
+                    description=0.95,
+                ),
+                warnings=["Salary not found"],
+                raw_url=url,
+            )
+
+        with patch(
+            "app.services.job_import.service.JobImportService.import_url",
+            AsyncMock(side_effect=import_side_effect),
+        ):
+            response = self.client.post(
+                "/api/v1/jobs/batch-import",
+                json={"urls": ["https://boards.greenhouse.io/acme/jobs/1", "not-a-url"]},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["results"][0]["success"])
+        self.assertFalse(response.json()["results"][1]["success"])
+        self.assertEqual(self.client.get("/api/v1/jobs").json(), [])
 
     async def _assert_status_events(self, job_id: str, expected: int) -> None:
         async with self.sessions() as db:

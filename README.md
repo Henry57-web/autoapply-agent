@@ -25,6 +25,8 @@ AutoApply Agent is a local-first AI Job Application Management Platform. It comb
 - import a single public job URL and prefill editable job metadata before generation
 - preserve immutable base and tailored resume versions linked to Jobs
 - review resume version diffs and download ATS-friendly TXT, Markdown, or PDF files
+- manage Jobs in Table or Kanban view with persistent status moves
+- create Jobs manually and batch-import up to 10 public Job URLs for review
 
 ## Architecture
 
@@ -234,6 +236,7 @@ Job URL import:
 
 ```text
 POST /api/v1/job-import/url
+POST /api/v1/jobs/batch-import
 ```
 
 JSON body:
@@ -245,6 +248,8 @@ JSON body:
 ```
 
 The import response contains editable company, title, location, salary, deadline, description, per-field confidence values, warnings, and the original URL. Importing never triggers generation or saves a Job. Review the populated form and click Generate explicitly.
+
+Batch import processes up to 10 URLs sequentially and returns a success or user-readable failure for each URL. It only creates previews. The Jobs page requires the user to select and confirm previews before saving them through `POST /api/v1/jobs`.
 
 Supported URL sources:
 
@@ -269,6 +274,7 @@ PATCH /api/v1/applications/{application_id}/metadata
 GET   /api/v1/applications/{application_id}/export/resume
 GET   /api/v1/applications/{application_id}/export/cover-letter
 POST  /api/v1/jobs
+POST  /api/v1/jobs/batch-import
 GET   /api/v1/jobs
 GET   /api/v1/jobs/{job_id}
 PATCH /api/v1/jobs/{job_id}
@@ -294,9 +300,20 @@ GET   /api/v1/jobs/{job_id}/resume-version
 - Non-base versions can be deleted. Base versions are protected.
 - PDF exports use a simple single-column text layout for ATS compatibility.
 
+## Job Pipeline Workspace
+
+- `/jobs` switches between a sortable Table and a status-grouped Kanban.
+- Cards can be dragged between columns or moved with the accessible `Move To` selector.
+- Failed status moves roll back and display an error.
+- `Add Job` saves a manual role as `SAVED`; company and title are required while JD is optional.
+- `Batch Import URLs` shows per-URL previews, warnings, partial failures, retry, selection, and explicit confirmation before saving.
+- Quick filters identify High Match, Ready To Apply, Needs Review, Deadline Soon, and Jobs without a linked Resume Version.
+- Imported confidence, warnings, and review state are stored in `jobs.ingestion_metadata`.
+
 ## Next Steps
 
-1. Capture a clean Git baseline and add CI for migration plus integration tests.
+1. Add CI for migration, integration tests, and frontend build.
 2. Add optional manual resume version editing without overwriting immutable snapshots.
+3. Design integration records keyed by `job_id` before beginning Gmail, OA, or Interview tracking.
 3. Add library rename, delete, and deduplication controls.
 4. Design Gmail, OA, interview, and ATS auto-apply integrations around `job_id`.
