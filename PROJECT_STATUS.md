@@ -21,6 +21,7 @@ Backend boundaries:
 - `backend/app/api/routes`: HTTP validation and REST endpoints.
 - `backend/app/services`: parsing, scoring, resume diffing, DOCX generation, prompt loading, LLM adapters, and workflow orchestration.
 - `backend/app/services/job_import`: source detection, SSRF-aware single-page fetching, platform parsers, and LLM fallback extraction.
+- `backend/app/services/email_*` and `backend/app/services/gmail_client.py`: Gmail OAuth, encrypted refresh-token handling, metadata-only sync, email classification, Job matching, and automated status sync.
 - `backend/app/services/resume_version_service.py`: immutable resume ledger, Job linkage, backfill, deletion rules, and downloads.
 - `backend/app/prompts`: externalized prompt templates.
 - `backend/app/models`: SQLAlchemy persistence models.
@@ -37,6 +38,8 @@ Frontend boundaries:
 - `frontend/app/jobs/[id]/page.tsx`: job detail and lifecycle tracking.
 - `frontend/app/resumes/page.tsx`: searchable resume version ledger.
 - `frontend/app/resumes/[id]/page.tsx`: version detail, diff summary, linked Job, and downloads.
+- `frontend/app/emails/page.tsx`: Gmail-derived application email inbox with search, filters, manual reclassification, and Job linking.
+- `frontend/app/settings/page.tsx`: Gmail connection status, OAuth start, and manual sync controls.
 - `frontend/components`: reusable UI sections for profiles, resumes, history, metadata, score results, exports, and diffs.
 - `frontend/lib/api.ts`: typed backend client.
 - `start.sh`, `status.sh`, and `stop.sh`: root-level local lifecycle helpers.
@@ -52,6 +55,8 @@ Database model:
 - `application_metadata`: optional job URL, source, location, salary, deadline, notes, and missing-skill classifications.
 - `jobs`: pipeline aggregate for a role, including status, score, lifecycle dates, generic ingestion metadata, and future integration anchors.
 - `job_status_events`: auditable state transition history with a source field for manual or automated updates.
+- `gmail_connections`: Gmail OAuth connection metadata, readonly scopes, encrypted refresh token, sync timestamps, and OAuth state.
+- `emails`: Gmail message metadata, snippet, classification, processing flag, optional Job link, and match metadata.
 
 ## Tech Stack
 
@@ -114,11 +119,22 @@ Database model:
 - Reconcile legacy applications, Jobs, source resumes, and tailored resume links with an explicit idempotent CLI.
 - Cover core persistence workflows with PostgreSQL-backed API integration tests.
 - Safely synchronize source changes to the configured GitHub remote with one-time or watch-mode commands.
+- Run GitHub Actions CI for backend migrations/tests/compileall and frontend production build using an isolated PostgreSQL service.
+- Provide test environment templates for backend and frontend without real secrets.
+- Provide a Gmail manual QA checklist covering OAuth setup, readonly scope verification, sync, classification, status sync, revocation, and local token cleanup.
 - Switch Jobs between Table and Kanban views.
 - Drag Jobs between status columns or use a reliable Move To selector with rollback on failure.
 - Create manual Jobs with an optional JD and required company/title.
 - Batch-import up to 10 public Job URLs into previews with partial success, retry, selection, and explicit save confirmation.
 - Filter Jobs quickly by high match, ready status, review need, upcoming deadline, or missing Resume Version.
+- Connect Gmail through Google OAuth using only `gmail.readonly`.
+- Encrypt Gmail refresh tokens with `GMAIL_TOKEN_ENCRYPTION_KEY`.
+- Manually sync recent Gmail messages without storing full bodies or attachments.
+- Classify application confirmations, OA invitations/reminders, interview invitations/reminders, rejections, offers, recruiter outreach, and other mail.
+- Match emails to existing Jobs by company, title, subject, sender, and snippet.
+- Automatically update Job status from matched Gmail signals and write `job_status_events` with source `gmail_sync`.
+- Review, search, filter, reclassify, link, unlink, and rematch emails at `/emails`.
+- Display pending OA, upcoming interviews, recruiter messages, unmatched emails, rejections, and offers on Dashboard.
 
 ## Current Progress
 
@@ -139,6 +155,7 @@ Working flows:
 - Review Jobs from the Dashboard, Jobs table, and Job Detail screens.
 - Manage Jobs from Table or Kanban view, add manual Jobs, and confirm batch-import previews.
 - Review Resume Versions from `/resumes`, open historical snapshots, and download TXT, Markdown, or PDF exports.
+- Connect Gmail from `/settings`, run manual sync, and manage imported email records at `/emails`.
 
 New Job Management APIs:
 
@@ -152,6 +169,12 @@ PATCH  /api/v1/jobs/{job_id}/status
 DELETE /api/v1/jobs/{job_id}
 GET    /api/v1/dashboard
 POST   /api/v1/job-import/url
+GET    /api/v1/gmail/status
+GET    /api/v1/gmail/oauth/start
+GET    /api/v1/gmail/oauth/callback
+POST   /api/v1/gmail/sync
+GET    /api/v1/emails
+PATCH  /api/v1/emails/{email_id}
 GET    /api/v1/resume-versions
 GET    /api/v1/resume-versions/{version_id}
 POST   /api/v1/resume-versions
@@ -198,6 +221,12 @@ Verification completed:
 - Alembic empty-database `upgrade head`, `downgrade -1`, re-upgrade, and `alembic check`: passing.
 - Job Pipeline migration `20260604_03`, manual create, status movement/events, batch partial-success import, and review rules: passing in isolated PostgreSQL.
 - Frontend production build with Table/Kanban workspace: passing.
+- Gmail integration migration `20260609_04`, metadata-only email ingestion, OAuth state storage, email classification, Job matching, automated status updates, and Dashboard email metrics: passing in isolated PostgreSQL.
+- Backend tests after Gmail integration: `55/55` passing with PostgreSQL integration database enabled.
+- Python bytecode compilation after Gmail integration: passing.
+- Frontend production build after Gmail pages: passing.
+- CI workflow local simulation after Gmail QA hardening: Alembic upgrade, latest downgrade/re-upgrade, backend tests `60/60`, compileall, and frontend build: passing.
+- Gmail safety review: `.env` ignored, tokens encrypted, full bodies/attachments not stored, tokens/API keys not logged, OAuth state validated, sync bounded to 1-90 days and 50 Gmail messages per run.
 - Configured Supabase adoption: stamped baseline, upgraded to `20260601_02 (head)`, and ran repeatable backfill successfully.
 - Supabase backfill first run: 5 applications scanned, 0 Jobs created, 2 resumes scanned, 0 versions created, 1 tailored version updated, 0 failures.
 - Supabase backfill second run: 0 records created or updated, confirming idempotency.
@@ -207,6 +236,8 @@ Verification completed:
 - `.gitignore`
 - `README.md`
 - `PROJECT_STATUS.md`
+- `.github/workflows/ci.yml`
+- `docs/GMAIL_QA_CHECKLIST.md`
 - `docker-compose.yml`
 - `profiles/haoyang-lin-candidate-profile.md`
 - `start.sh`
@@ -214,22 +245,27 @@ Verification completed:
 - `status.sh`
 - `stop.sh`
 - `backend/requirements.txt`
+- `backend/.env.example`
+- `backend/.env.test.example`
 - `backend/alembic.ini`
 - `backend/alembic/env.py`
 - `backend/alembic/script.py.mako`
 - `backend/alembic/versions/20260601_01_baseline_schema.py`
 - `backend/alembic/versions/20260601_02_resume_ledger_legacy_compat.py`
 - `backend/alembic/versions/20260604_03_job_ingestion_metadata.py`
+- `backend/alembic/versions/20260609_04_gmail_email_integration.py`
 - `backend/app/main.py`
 - `backend/app/core/config.py`
 - `backend/app/db/base.py`
 - `backend/app/db/session.py`
 - `backend/app/models/application.py`
 - `backend/app/models/job.py`
+- `backend/app/models/email.py`
 - `backend/app/models/__init__.py`
 - `backend/app/schemas/mvp.py`
 - `backend/app/schemas/applications.py`
 - `backend/app/schemas/jobs.py`
+- `backend/app/schemas/emails.py`
 - `backend/app/schemas/job_import.py`
 - `backend/app/schemas/resume_versions.py`
 - `backend/app/schemas/jobs.py`
@@ -239,6 +275,7 @@ Verification completed:
 - `backend/app/api/routes/jobs.py`
 - `backend/app/api/routes/job_import.py`
 - `backend/app/api/routes/resume_versions.py`
+- `backend/app/api/routes/emails.py`
 - `backend/app/services/document_parser.py`
 - `backend/app/services/docx_export.py`
 - `backend/app/services/match_scorer.py`
@@ -247,6 +284,11 @@ Verification completed:
 - `backend/app/services/tailoring_service.py`
 - `backend/app/services/application_presenter.py`
 - `backend/app/services/job_service.py`
+- `backend/app/services/email_classifier.py`
+- `backend/app/services/email_matcher.py`
+- `backend/app/services/email_service.py`
+- `backend/app/services/gmail_client.py`
+- `backend/app/services/token_cipher.py`
 - `backend/app/services/job_import/__init__.py`
 - `backend/app/services/job_import/fetcher.py`
 - `backend/app/services/job_import/parsers.py`
@@ -273,10 +315,12 @@ Verification completed:
 - `backend/tests/test_job_service.py`
 - `backend/tests/test_resume_versions.py`
 - `backend/tests/test_job_import.py`
+- `backend/tests/test_email_services.py`
 - `backend/tests/integration/__init__.py`
 - `backend/tests/integration/test_api_integration.py`
 - `frontend/package.json`
 - `frontend/package-lock.json`
+- `frontend/.env.test.example`
 - `frontend/app/layout.tsx`
 - `frontend/app/globals.css`
 - `frontend/app/page.tsx`
@@ -285,6 +329,8 @@ Verification completed:
 - `frontend/app/jobs/[id]/page.tsx`
 - `frontend/app/resumes/page.tsx`
 - `frontend/app/resumes/[id]/page.tsx`
+- `frontend/app/emails/page.tsx`
+- `frontend/app/settings/page.tsx`
 - `frontend/lib/api.ts`
 - `frontend/lib/job-pipeline.ts`
 - `frontend/components/jobs/AddJobDialog.tsx`
@@ -321,21 +367,26 @@ Verification completed:
 - The Job URL importer fetches public server-rendered HTML only. It does not run a browser for JavaScript-heavy pages.
 - Integration tests cover core APIs, but metadata PATCH, DOCX endpoints, and generic public career-page imports still rely on unit or smoke coverage.
 - The browser automation security policy blocked an automated click into the History tab. History metadata behavior was verified through API checks and frontend build validation, but the History screen should receive a short manual UI smoke test.
+- Gmail sync is manual and metadata-only; there is no realtime Gmail watch, incremental cursor, or Google Pub/Sub integration yet.
+- Gmail OAuth requires local Google Cloud OAuth credentials and a Fernet encryption key. Public deployment may require Google app verification for the restricted Gmail readonly scope.
+- Email classification and Job matching are deterministic heuristics. Unmatched and manually overridden emails are supported, but semantic LLM classification is not enabled yet.
+- CI is configured but has not been observed on GitHub Actions in this local session. The local equivalent commands pass.
 - There is no authentication or per-user data boundary. This is acceptable for local-only personal use, but it blocks public deployment.
 
 ## TODO (Priority Order)
 
-1. Add CI that boots PostgreSQL, runs migrations, the integration suite, and the frontend build.
+1. Push this branch and confirm the GitHub Actions CI workflow passes on GitHub.
 2. Add integration coverage for application metadata PATCH, DOCX downloads, and generic public career-page imports.
-3. Add optional manual tailored-resume editing that creates a new immutable version instead of overwriting snapshots.
-4. Add rename, delete, and deduplication controls for saved candidate profiles and base resumes.
-5. Design integration modules keyed by `job_id`: Gmail synchronization, OA tracking, interview tracking, and auto apply.
-6. Decide whether original uploaded files should be stored locally or in object storage.
-7. Add authentication only if the product scope changes from local personal use to deployment.
+3. Add Gmail incremental sync cursor and optional Google Pub/Sub watch after manual sync proves stable.
+4. Add optional manual tailored-resume editing that creates a new immutable version instead of overwriting snapshots.
+5. Add rename, delete, and deduplication controls for saved candidate profiles and base resumes.
+6. Design dedicated OA and Interview tracking modules keyed by `job_id` and linked `emails`.
+7. Decide whether original uploaded files should be stored locally or in object storage.
+8. Add authentication only if the product scope changes from local personal use to deployment.
 
 ## Next Recommended Task
 
-Add CI for Alembic, PostgreSQL integration tests, and the frontend build before beginning another product module.
+Push the CI workflow and confirm it passes on GitHub Actions before beginning Gmail realtime sync or dedicated OA/Interview modules.
 
 ## Session Summary
 
@@ -365,16 +416,18 @@ Add CI for Alembic, PostgreSQL integration tests, and the frontend build before 
 - Added an explicit repeatable legacy backfill CLI and verified it is idempotent against local tests and Supabase.
 - Added PostgreSQL-backed integration tests for Generate, Jobs, Dashboard, Resume Versions, Job Import, and legacy reconciliation.
 - Added the Table/Kanban Jobs workspace, persistent status movement, manual Job creation, batch URL preview/confirmation, and quick filters.
+- Added Gmail readonly OAuth integration, encrypted token storage, manual metadata-only sync, email classification, Job matching, automatic status updates, Dashboard email metrics, `/settings`, and `/emails`.
+- Added GitHub Actions CI, test env templates, Gmail manual QA checklist, expanded Gmail mock/integration tests, and documented the Gmail security review.
 
 ## How To Resume
 
 1. Open the repository at `/Users/haoyanglin/Documents/Playground/autoapply-agent`.
 2. Read this file and `README.md`.
-3. Check `git status --short` and review the current Job Pipeline Workspace changes.
+3. Check `git status --short` and review the current Gmail integration changes.
 4. Confirm that `backend/.env` exists locally. Do not print or commit it because it contains database and LLM credentials.
 5. Confirm the backend with `curl http://127.0.0.1:8000/health`. Start it if needed.
 6. Confirm the frontend at `http://localhost:3000`. Start it if needed.
-7. Run `cd backend && .venv/bin/python -m alembic current` and confirm `20260604_03 (head)`.
+7. Run `cd backend && .venv/bin/python -m alembic current` and confirm `20260609_04 (head)`.
 8. Run backend tests and the frontend production build before further feature work.
 9. Create a clean Git baseline commit after reviewing untracked files and excluding secrets.
 
@@ -411,6 +464,22 @@ cd backend
 .venv/bin/python -m alembic upgrade head
 .venv/bin/python -m alembic check
 .venv/bin/python -m app.cli.backfill_legacy
+```
+
+Generate Gmail token encryption key:
+
+```bash
+cd backend
+.venv/bin/python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Required Gmail environment variables:
+
+```text
+GMAIL_CLIENT_ID
+GMAIL_CLIENT_SECRET
+GMAIL_REDIRECT_URI
+GMAIL_TOKEN_ENCRYPTION_KEY
 ```
 
 Run PostgreSQL-backed integration tests:
@@ -469,6 +538,8 @@ Not configured. The current scope is local-only personal use.
 - `backend/app/db/session.py` intentionally disables prepared statement caching and uses `NullPool` for Supabase/Supavisor compatibility.
 - `backend/alembic/env.py` uses the same asyncpg pooler compatibility settings.
 - Prompts are stored in Markdown files under `backend/app/prompts`; do not hardcode provider prompts inside services.
+- Gmail sync requests only `https://www.googleapis.com/auth/gmail.readonly`; do not add send/modify scopes unless the product scope changes and the security model is redesigned.
+- Gmail stores metadata, snippet, classification, and Job linkage only. Do not store full email bodies or attachments without a privacy review.
 - Existing saved profile and resume rows may contain duplicates from earlier workflow tests.
 - Base resumes and tailored versions are separate concepts: `resumes` are reusable source documents, while `resume_versions` belong to job-specific tailoring runs.
 - Local Node tooling was installed under `.tools/node` on the current machine. On another machine, a normal Node.js installation and standard `npm` commands are sufficient.
@@ -477,4 +548,4 @@ Not configured. The current scope is local-only personal use.
 
 ## Last Updated
 
-2026-06-04 02:16:59 EDT
+2026-06-09 15:52:10 EDT

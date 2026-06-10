@@ -131,6 +131,12 @@ class DashboardStats(BaseModel):
     rejected: int
     average_match_score: float
     highest_match_score: float
+    pending_oa: int = 0
+    upcoming_interviews: int = 0
+    new_recruiter_messages: int = 0
+    unmatched_emails: int = 0
+    recent_rejections: int = 0
+    recent_offers: int = 0
 
 
 class JobBatchImportRequest(BaseModel):

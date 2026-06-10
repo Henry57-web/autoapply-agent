@@ -2,6 +2,7 @@ from app.core.config import Settings
 from app.services.llm.gemini import GeminiProvider
 from app.services.llm.openai_compatible import OpenAICompatibleProvider
 from app.services.llm.provider import LLMProvider
+from app.services.llm.test_provider import TestProvider
 
 
 OPENAI_COMPATIBLE_BASE_URLS = {
@@ -20,9 +21,11 @@ def create_llm_provider(settings: Settings) -> LLMProvider:
         raise ValueError(f"LLM_MODEL is required for provider: {provider}")
     if provider == "gemini":
         return GeminiProvider(api_key, model, settings.llm_base_url)
+    if provider == "test":
+        return TestProvider()
     if provider in OPENAI_COMPATIBLE_BASE_URLS:
         base_url = settings.llm_base_url or OPENAI_COMPATIBLE_BASE_URLS[provider]
         return OpenAICompatibleProvider(api_key, model, base_url)
 
-    supported = ", ".join(sorted([*OPENAI_COMPATIBLE_BASE_URLS, "gemini"]))
+    supported = ", ".join(sorted([*OPENAI_COMPATIBLE_BASE_URLS, "gemini", "test"]))
     raise ValueError(f"Unsupported LLM_PROVIDER '{provider}'. Supported providers: {supported}")

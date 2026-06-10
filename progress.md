@@ -48,3 +48,30 @@
 - Restarted a stale pre-change backend process and reverified all 6 Supabase Jobs expose review and linked-resume summary flags.
 - Acceptance testing exposed and fixed whole-batch rejection for malformed URLs, empty-JD review classification, whitespace-only required fields, and missing batch result totals.
 - Verified Table/Kanban parity with 10 persisted Jobs, status movement through APPLIED/INTERVIEW/OFFER/REJECTED, 5 status events, Dashboard synchronization, Quick Filters, live Greenhouse/Lever parsing, `3 success / 2 failed` partial import, and restart persistence.
+
+## Gmail Integration And Status Sync - 2026-06-09
+
+- Designed Gmail as a metadata-only ingestion layer keyed to existing `jobs` and `job_status_events`.
+- Added Alembic migration `20260609_04` for `gmail_connections` and `emails`.
+- Added Gmail OAuth start/status/callback endpoints with OAuth state storage and readonly scope.
+- Added encrypted refresh-token helpers backed by `GMAIL_TOKEN_ENCRYPTION_KEY`.
+- Added manual Gmail sync for recent messages using Gmail metadata and snippets only.
+- Added deterministic email classification for application confirmations, OA, interviews, rejections, offers, recruiter outreach, and other mail.
+- Added deterministic Job matching by company, title, sender, subject, snippet, and optional body text.
+- Added automatic status sync from matched email signals to APPLIED, OA_RECEIVED, INTERVIEW, REJECTED, and OFFER with `job_status_events.source = gmail_sync`.
+- Added Dashboard email metrics for pending OA, upcoming interviews, recruiter messages, unmatched emails, recent rejections, and recent offers.
+- Added `/settings` for Gmail connection and sync controls.
+- Added `/emails` for search, filtering, manual reclassification, linking, unlinking, and rematching.
+- Added unit and PostgreSQL-backed integration tests for Gmail URL generation, email classification, matching, ingest, manual override, OAuth state, status sync, and Dashboard metrics.
+- Verified Alembic upgrade through `20260609_04`, `55/55` backend tests, Python compileall, and frontend production build.
+
+## CI And Gmail QA Hardening - 2026-06-09
+
+- Added `.github/workflows/ci.yml` with PostgreSQL service, backend dependency install, Alembic upgrade, latest downgrade/re-upgrade, backend tests, compileall, frontend dependency install, and frontend production build.
+- Added `backend/.env.test.example` and `frontend/.env.test.example` with dummy CI-safe Gmail and LLM values.
+- Added Gmail variables to `backend/.env.example`.
+- Added `docs/GMAIL_QA_CHECKLIST.md` for Google OAuth setup, redirect URI verification, Fernet key generation, readonly scope verification, sync, classification QA, status sync QA, permission revocation, and local token cleanup.
+- Expanded Gmail tests to cover application confirmations, OA, interviews, rejections, offers, recruiter outreach, unmatched emails, company matching, title matching, status events, duplicate Gmail message IDs, and manual override flows.
+- Tightened Job matching so exact title matches can link emails when company text is absent, while fuzzy-only matches remain below threshold.
+- Confirmed security posture: `.env` is ignored, refresh tokens are encrypted, full email bodies and attachments are not stored, token/API key values are not logged, OAuth state is stored and validated, sync range is bounded, and Gmail fetches are metadata/snippet-only.
+- Local CI simulation passed: Alembic upgrade, latest downgrade/re-upgrade, backend tests `60/60`, compileall, and frontend build.

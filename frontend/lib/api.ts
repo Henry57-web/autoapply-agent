@@ -204,6 +204,72 @@ export type DashboardStats = {
   rejected: number;
   average_match_score: number;
   highest_match_score: number;
+  pending_oa: number;
+  upcoming_interviews: number;
+  new_recruiter_messages: number;
+  unmatched_emails: number;
+  recent_rejections: number;
+  recent_offers: number;
+};
+
+export const EMAIL_TYPES = [
+  "APPLICATION_CONFIRMATION",
+  "OA_INVITATION",
+  "OA_REMINDER",
+  "INTERVIEW_INVITATION",
+  "INTERVIEW_REMINDER",
+  "REJECTION",
+  "OFFER",
+  "RECRUITER_OUTREACH",
+  "OTHER",
+] as const;
+
+export type EmailType = (typeof EMAIL_TYPES)[number];
+
+export type GmailConnectionStatus = {
+  connected: boolean;
+  email_address: string | null;
+  scopes: string[];
+  last_sync_at: string | null;
+  requires_configuration: boolean;
+};
+
+export type GmailOAuthStart = {
+  authorization_url: string;
+  scope: string;
+  state: string;
+};
+
+export type GmailSyncResult = {
+  scanned: number;
+  imported: number;
+  updated: number;
+  matched: number;
+  unmatched: number;
+  status_updates: number;
+  failed: number;
+  errors: string[];
+};
+
+export type EmailSummary = {
+  id: string;
+  gmail_message_id: string;
+  thread_id: string | null;
+  job_id: string | null;
+  subject: string | null;
+  sender: string | null;
+  received_at: string;
+  email_type: EmailType;
+  raw_snippet: string;
+  is_processed: boolean;
+  created_at: string;
+  linked_job: JobSummary | null;
+};
+
+export type EmailUpdateInput = {
+  email_type?: EmailType | null;
+  job_id?: string | null;
+  clear_job?: boolean;
 };
 
 export const APPLICATION_STATUSES = [
@@ -422,6 +488,42 @@ export async function updateJob(jobId: string, input: JobUpdateInput): Promise<J
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   return request<DashboardStats>("/api/v1/dashboard");
+}
+
+export async function getGmailStatus(): Promise<GmailConnectionStatus> {
+  return request<GmailConnectionStatus>("/api/v1/gmail/status");
+}
+
+export async function startGmailOAuth(): Promise<GmailOAuthStart> {
+  return request<GmailOAuthStart>("/api/v1/gmail/oauth/start");
+}
+
+export async function syncGmail(days = 30): Promise<GmailSyncResult> {
+  return request<GmailSyncResult>("/api/v1/gmail/sync", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ days }),
+  });
+}
+
+export async function listEmails(params: {
+  search?: string;
+  emailType?: EmailType | "";
+  unmatched?: boolean;
+} = {}): Promise<EmailSummary[]> {
+  const query = new URLSearchParams();
+  if (params.search) query.set("search", params.search);
+  if (params.emailType) query.set("email_type", params.emailType);
+  if (params.unmatched) query.set("unmatched", "true");
+  return request<EmailSummary[]>(`/api/v1/emails${query.size ? `?${query}` : ""}`);
+}
+
+export async function updateEmail(emailId: string, input: EmailUpdateInput): Promise<EmailSummary> {
+  return request<EmailSummary>(`/api/v1/emails/${emailId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
 }
 
 export async function listResumeVersions(params: {

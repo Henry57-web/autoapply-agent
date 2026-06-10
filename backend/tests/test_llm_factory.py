@@ -4,11 +4,14 @@ from app.core.config import Settings
 from app.services.llm.factory import create_llm_provider
 from app.services.llm.gemini import GeminiProvider
 from app.services.llm.openai_compatible import OpenAICompatibleProvider
+from app.services.llm.test_provider import TestProvider
 
 
 class LLMFactoryTests(unittest.TestCase):
     def test_gemini_uses_cost_effective_default_model(self) -> None:
-        provider = create_llm_provider(Settings(llm_provider="gemini", llm_api_key="test"))
+        provider = create_llm_provider(
+            Settings(llm_provider="gemini", llm_api_key="test", llm_model="gemini-2.5-flash-lite")
+        )
 
         self.assertIsInstance(provider, GeminiProvider)
         self.assertEqual(provider.model, "gemini-2.5-flash-lite")
@@ -32,6 +35,11 @@ class LLMFactoryTests(unittest.TestCase):
 
         self.assertIsInstance(provider, OpenAICompatibleProvider)
         self.assertEqual(provider.model, "gpt-4.1-nano")
+
+    def test_test_provider_uses_offline_adapter(self) -> None:
+        provider = create_llm_provider(Settings(llm_provider="test", llm_model="mock"))
+
+        self.assertIsInstance(provider, TestProvider)
 
     def test_unknown_provider_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "Unsupported LLM_PROVIDER"):

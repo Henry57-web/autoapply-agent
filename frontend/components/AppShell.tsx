@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BriefcaseBusiness, Files, Sparkles } from "lucide-react";
+import { BarChart3, BriefcaseBusiness, Files, Mail, Settings, Sparkles } from "lucide-react";
 
 const links = [
   { href: "/", label: "Dashboard", icon: BarChart3 },
   { href: "/jobs", label: "Jobs", icon: BriefcaseBusiness },
   { href: "/resumes", label: "Resumes", icon: Files },
+  { href: "/emails", label: "Emails", icon: Mail },
   { href: "/generate", label: "Tailor Resume", icon: Sparkles },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

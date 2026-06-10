@@ -7,6 +7,7 @@ from app.models.application import (
     ResumeVersion,
 )
 from app.models.job import Job, JobStatusEvent
+from app.models.email import Email, GmailConnection
 
 __all__ = [
     "Application",
@@ -17,4 +18,6 @@ __all__ = [
     "ResumeVersion",
     "Job",
     "JobStatusEvent",
+    "Email",
+    "GmailConnection",
 ]

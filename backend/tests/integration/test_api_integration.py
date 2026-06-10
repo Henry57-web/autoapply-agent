@@ -10,9 +10,11 @@ from sqlalchemy.pool import NullPool
 
 from app.db.session import get_db_session
 from app.main import app
-from app.models import Application, CandidateProfile, Job, JobStatusEvent, Resume, ResumeVersion
+from app.models import Application, CandidateProfile, GmailConnection, Job, JobStatusEvent, Resume, ResumeVersion
+from app.schemas.emails import EmailIngest
 from app.schemas.job_import import JobImportConfidence, JobImportResult
 from app.schemas.mvp import JobAnalysis, MatchScoreBreakdown, TailoredResume
+from app.services.email_service import ingest_emails
 from app.services.job_import.fetcher import JobPageFetchError
 from app.services.job_import.service import JobImportError
 from app.services.legacy_backfill import run_legacy_backfill
@@ -46,6 +48,8 @@ MOCK_IMPORTS = [
     ),
 ]
 TABLES = [
+    "emails",
+    "gmail_connections",
     "job_status_events",
     "application_metadata",
     "application_statuses",
@@ -233,6 +237,25 @@ class ApiIntegrationTests(unittest.TestCase):
             events = list(await db.scalars(select(JobStatusEvent).where(JobStatusEvent.job_id == job_id)))
             self.assertEqual(len(events), expected)
 
+    async def _assert_email_status_event(self, job_id: str, source: str) -> None:
+        async with self.sessions() as db:
+            event = await db.scalar(
+                select(JobStatusEvent)
+                .where(JobStatusEvent.job_id == job_id, JobStatusEvent.source == source)
+                .order_by(JobStatusEvent.created_at.desc())
+                .limit(1)
+            )
+            self.assertIsNotNone(event)
+
+    async def _assert_oauth_state_persisted(self, state: str) -> None:
+        async with self.sessions() as db:
+            connection = await db.scalar(select(GmailConnection))
+            self.assertEqual(connection.metadata_record["oauth_state"], state)
+
+    async def _ingest_messages(self, messages: list[EmailIngest]):
+        async with self.sessions() as db:
+            return await ingest_emails(db, messages)
+
     def test_dashboard_aggregates_pipeline(self) -> None:
         jobs = [self._create_job(title=f"Role {index}") for index in range(6)]
         statuses = ["APPLIED", "OA_RECEIVED", "INTERVIEW", "OFFER", "REJECTED"]
@@ -250,6 +273,102 @@ class ApiIntegrationTests(unittest.TestCase):
         self.assertEqual(dashboard["rejected"], 1)
         self.assertEqual(dashboard["average_match_score"], 65)
         self.assertEqual(dashboard["highest_match_score"], 90)
+
+    def test_email_ingest_matches_job_updates_status_and_dashboard_metrics(self) -> None:
+        job = self._create_job(company="Datadog", title="Data Engineer Intern")
+        result = asyncio.run(
+            self._ingest_messages(
+                [
+                    EmailIngest(
+                        gmail_message_id="gmail-oa-1",
+                        thread_id="thread-1",
+                        subject="Datadog Online Assessment for Data Engineer Intern",
+                        sender="careers@datadog.com",
+                        received_at="2026-06-09T12:00:00Z",
+                        raw_snippet="Please complete your coding assessment for Datadog.",
+                    )
+                ]
+            )
+        )
+
+        self.assertEqual(result.matched, 1)
+        self.assertEqual(result.status_updates, 1)
+        emails = self.client.get("/api/v1/emails").json()
+        self.assertEqual(len(emails), 1)
+        self.assertEqual(emails[0]["email_type"], "OA_INVITATION")
+        self.assertEqual(emails[0]["job_id"], job["id"])
+        updated_job = self.client.get(f"/api/v1/jobs/{job['id']}").json()
+        self.assertEqual(updated_job["status"], "OA_RECEIVED")
+        self.assertIsNotNone(updated_job["oa_received_at"])
+        dashboard = self.client.get("/api/v1/dashboard").json()
+        self.assertEqual(dashboard["pending_oa"], 1)
+        asyncio.run(self._assert_email_status_event(job["id"], "gmail_sync"))
+
+    def test_duplicate_gmail_message_id_updates_existing_email_without_duplicate_row(self) -> None:
+        job = self._create_job(company="Datadog", title="Data Engineer Intern")
+        message = EmailIngest(
+            gmail_message_id="gmail-duplicate-1",
+            thread_id="thread-1",
+            subject="Datadog Application Received",
+            sender="careers@datadog.com",
+            received_at="2026-06-09T12:00:00Z",
+            raw_snippet="Thank you for applying. We received your application.",
+        )
+
+        first = asyncio.run(self._ingest_messages([message]))
+        second = asyncio.run(self._ingest_messages([message.model_copy(update={"raw_snippet": "Thank you for applying again."})]))
+
+        self.assertEqual(first.imported, 1)
+        self.assertEqual(second.imported, 0)
+        self.assertEqual(second.updated, 1)
+        self.assertEqual(len(self.client.get("/api/v1/emails").json()), 1)
+        status_events = self.client.get(f"/api/v1/jobs/{job['id']}").json()["status_events"]
+        self.assertEqual([event["source"] for event in status_events].count("gmail_sync"), 1)
+
+    def test_email_ingest_keeps_unmatched_email_and_manual_override_syncs_status(self) -> None:
+        job = self._create_job(company="Acme AI", title="Machine Learning Engineer")
+        result = asyncio.run(
+            self._ingest_messages(
+                [
+                    EmailIngest(
+                        gmail_message_id="gmail-unmatched-1",
+                        subject="Unknown recruiter message",
+                        sender="recruiter@example.com",
+                        received_at="2026-06-09T12:00:00Z",
+                        raw_snippet="I have a new opportunity to discuss.",
+                    )
+                ]
+            )
+        )
+        self.assertEqual(result.unmatched, 1)
+        email = self.client.get("/api/v1/emails?unmatched=true").json()[0]
+        self.assertIsNone(email["job_id"])
+
+        patched = self.client.patch(
+            f"/api/v1/emails/{email['id']}",
+            json={"email_type": "OFFER", "job_id": job["id"]},
+        )
+
+        self.assertEqual(patched.status_code, 200)
+        self.assertEqual(patched.json()["job_id"], job["id"])
+        self.assertEqual(self.client.get(f"/api/v1/jobs/{job['id']}").json()["status"], "OFFER")
+        dashboard = self.client.get("/api/v1/dashboard").json()
+        self.assertEqual(dashboard["recent_offers"], 1)
+
+    def test_gmail_status_and_oauth_start_use_state(self) -> None:
+        with patch("app.api.routes.emails._gmail_client") as client_factory:
+            client_factory.return_value.is_configured = True
+            client_factory.return_value.authorization_url.return_value = "https://accounts.google.com/o/oauth2/v2/auth?state=abc"
+            status_response = self.client.get("/api/v1/gmail/status")
+            self.assertEqual(status_response.status_code, 200)
+            self.assertFalse(status_response.json()["connected"])
+            self.assertIn("requires_configuration", status_response.json())
+
+            start_response = self.client.get("/api/v1/gmail/oauth/start")
+
+        self.assertEqual(start_response.status_code, 200)
+        self.assertTrue(start_response.json()["state"])
+        asyncio.run(self._assert_oauth_state_persisted(start_response.json()["state"]))
 
     def test_resume_version_crud_downloads_and_base_protection(self) -> None:
         resume = asyncio.run(self._seed_resume())

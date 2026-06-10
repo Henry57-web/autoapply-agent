@@ -14,11 +14,15 @@ class Settings(BaseSettings):
     llm_api_key: str | None = None
     llm_model: str | None = None
     llm_base_url: str | None = None
+    gmail_client_id: str | None = None
+    gmail_client_secret: str | None = None
+    gmail_redirect_uri: str | None = "http://127.0.0.1:8000/api/v1/gmail/oauth/callback"
+    gmail_token_encryption_key: str | None = None
 
     # Kept for existing local .env files. Prefer the provider-neutral LLM_* settings.
     openai_api_key: str | None = None
     openai_model: str | None = None
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000", "http://localhost:3001"]
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

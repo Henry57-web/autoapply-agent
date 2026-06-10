@@ -15,6 +15,12 @@ const emptyStats: DashboardStats = {
   rejected: 0,
   average_match_score: 0,
   highest_match_score: 0,
+  pending_oa: 0,
+  upcoming_interviews: 0,
+  new_recruiter_messages: 0,
+  unmatched_emails: 0,
+  recent_rejections: 0,
+  recent_offers: 0,
 };
 
 export default function DashboardPage() {
@@ -64,6 +70,14 @@ export default function DashboardPage() {
           <section className="grid gap-3 sm:grid-cols-2">
             <StatCard label="Average Match Score" value={`${stats.average_match_score}%`} emphasis />
             <StatCard label="Highest Match Score" value={`${stats.highest_match_score}%`} emphasis />
+          </section>
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            <StatCard label="Pending OA" value={stats.pending_oa} />
+            <StatCard label="Upcoming Interviews" value={stats.upcoming_interviews} />
+            <StatCard label="New Recruiter Messages" value={stats.new_recruiter_messages} />
+            <StatCard label="Unmatched Emails" value={stats.unmatched_emails} />
+            <StatCard label="Recent Rejections" value={stats.recent_rejections} />
+            <StatCard label="Recent Offers" value={stats.recent_offers} />
           </section>
           {stats.total_jobs === 0 ? (
             <section className="rounded-md border border-dashed border-ink/20 bg-white/70 p-8 text-center">

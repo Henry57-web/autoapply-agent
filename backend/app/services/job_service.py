@@ -7,6 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models import Application, ApplicationMetadata, Job, JobStatusEvent, Resume, ResumeVersion
 from app.schemas.jobs import DashboardStats, JobCreate, JobSortField, JobStatus, JobUpdate, SortDirection
+from app.services.email_service import get_email_metrics
 
 
 MILESTONE_FIELDS = {
@@ -148,6 +149,7 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
     counts = dict((await db.execute(select(Job.status, func.count()).group_by(Job.status))).all())
     score_stats = await db.execute(select(func.avg(Job.match_score), func.max(Job.match_score)))
     average_score, highest_score = score_stats.one()
+    email_metrics = await get_email_metrics(db)
     return DashboardStats(
         total_jobs=sum(counts.values()),
         ready_to_apply=counts.get("READY_TO_APPLY", 0),
@@ -158,6 +160,12 @@ async def get_dashboard_stats(db: AsyncSession) -> DashboardStats:
         rejected=counts.get("REJECTED", 0),
         average_match_score=round(float(average_score or 0), 2),
         highest_match_score=round(float(highest_score or 0), 2),
+        pending_oa=email_metrics.pending_oa,
+        upcoming_interviews=email_metrics.upcoming_interviews,
+        new_recruiter_messages=email_metrics.new_recruiter_messages,
+        unmatched_emails=email_metrics.unmatched_emails,
+        recent_rejections=email_metrics.recent_rejections,
+        recent_offers=email_metrics.recent_offers,
     )
 
 
